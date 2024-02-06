@@ -17,88 +17,86 @@
 
 
 #include "KdTree.h"
+#include "Point.h"
 using namespace std;
 
 
+
 // For testing data input -- print a few
-void printSamplePoints(const vector<vector<double>>& points, size_t sampleSize) {
+void printSamplePoints(const vector<Point>& points, size_t sampleSize) {
     cout << fixed << setprecision(2);
     for (size_t i = 0; i < sampleSize; i++) {
         cout << "Point " << i + 1 << ": ";
-        for (double val : points[i]) {
-            cout << val << " ";
-        }
+        cout << points[i].x << " " << points[i].y << " " << points[i].z << " " << points[i].r << " " 
+                << points[i].g << " " << points[i].b << " " << points[i].source;
         cout << endl;
     }
 }
 
     
 // Function to convert a point to a comma-separated string, for output use
-string pointToString(const vector<double>& point) {
+string pointToString(const Point& point) {
     ostringstream oss;
-    for (size_t i = 0; i < point.size(); i++) {
-        if (i != 0) {
-            oss << ", ";
-        }
-        oss << point[i];
-    }
+    oss << point.x << ", " << point.y << ", " << point.z << ", " << point.r << ", " << point.g << ", " << point.b << "," << point.source << ",";
     return oss.str();
 }
 
 
-
 // Parsing functions for each data types:
 // Function to parse csv or txt line
-vector<double> parseLine(const string& line, char delimiter) {
-    vector<double> point;
+Point parseLine(const string& line, char delimiter, string source) {
     istringstream lineStream(line);
     string value;
+    vector<float> point;
 
+    // Read all components into the vector
     while (getline(lineStream, value, delimiter)) {
-        try {
-            point.push_back(stod(value));
-        } catch (const invalid_argument&) {
-            cerr << "Warning: Invalid number '" << value << "' found." << endl;
-        }
+        point.push_back(stof(value));
     }
 
-    return point;
+    // Validation
+    if (point.size() < 6) {
+        throw runtime_error("Invalid data: Each line must contain at least attributes for XYZRGB.");
+    }
+
+    // Extract the first 3 attributes for x, y, z and the last 3 for r, g, b
+    float x = point[0];
+    float y = point[1];
+    float z = point[2];
+    int r = static_cast<int>(point[point.size() - 3]);  
+    int g = static_cast<int>(point[point.size() - 2]);  
+    int b = static_cast<int>(point[point.size() - 1]);  
+
+    // Construct and return a Point with these values
+    return Point(x, y, z, r, g, b, source);
 }
 
-// Define a struct to represent a point from a PLY file
-struct PlyData {
-    float x, y, z; // 3d attributes
-    uint8_t red, green, blue; // color
 
-    vector<double> toVector() const {
-        return {static_cast<double>(x), 
-            static_cast<double>(y), 
-            static_cast<double>(z), 
-            static_cast<double>(red), 
-            static_cast<double>(green), 
-            static_cast<double>(blue), 
-        };
-    }
-};
+vector<Point> parsePlyData(ifstream& file, int vertexCount, string source) {
+    vector<Point> points;
 
-// Function to parse the PLY file
-vector<vector<double>> parsePlyData(ifstream& file, int vertexCount) {
-    vector<vector<double>> points;
-    PlyData point;
+    for (int i = 0; i < vertexCount; ++i) {
+        float x, y, z;
+        uint8_t r, g, b;
 
-    for (int i = 0; i < vertexCount; i++) {
-        file.read(reinterpret_cast<char*>(&point), sizeof(PlyData));
-        points.push_back(point.toVector());
+        file.read(reinterpret_cast<char*>(&x), sizeof(float));
+        file.read(reinterpret_cast<char*>(&y), sizeof(float));
+        file.read(reinterpret_cast<char*>(&z), sizeof(float));
+        file.read(reinterpret_cast<char*>(&r), sizeof(uint8_t));
+        file.read(reinterpret_cast<char*>(&g), sizeof(uint8_t));
+        file.read(reinterpret_cast<char*>(&b), sizeof(uint8_t));
+
+        points.emplace_back(x, y, z, r, g, b, source);
     }
 
     return points;
 }
 
-vector<vector<double>> parseLasData(const string& filePath) {
-    vector<vector<double>> points;
 
-    ifstream ifs;
-    ifs.open(filePath, ios::in | ios::binary);
+
+vector<Point> parseLasData(const string& filePath, string source) {
+    vector<Point> points;
+    ifstream ifs(filePath, ios::in | ios::binary);
 
     if (!ifs.is_open()) {
         throw runtime_error("Error opening LAS file: " + filePath);
@@ -111,18 +109,10 @@ vector<vector<double>> parseLasData(const string& filePath) {
         const liblas::Point& p = reader.GetPoint();
         const liblas::Color& color = p.GetColor();
 
-        // Extract X, Y, Z and RGB
-        vector<double> point = {
-            static_cast<double>(p.GetX()), 
-            static_cast<double>(p.GetY()), 
-            static_cast<double>(p.GetZ()),
-            static_cast<double>(color.GetRed()),
-            static_cast<double>(color.GetGreen()),
-            static_cast<double>(color.GetBlue()),
-        };
-        points.push_back(point);
+        points.emplace_back(p.GetX(), p.GetY(), p.GetZ(), color.GetRed(), color.GetGreen(), color.GetBlue(), source);
     }
 
+    ifs.close();
     return points;
 }
 
@@ -133,31 +123,41 @@ vector<vector<double>> parseLasData(const string& filePath) {
 
 
 // Read input point cloud data
-vector<vector<double>> readPointCloudData(const string& filePath) {
-    ifstream file(filePath);
-    if (!file.is_open()) {
-        throw runtime_error("Error opening the file: " + filePath);
-    }
-
-    vector<vector<double>> points;
+vector<Point> readPointCloudData(const string& filePath) {
+    vector<Point> points;
     string line;
     string fileExtension = filePath.substr(filePath.find_last_of(".") + 1);
+    string fileName = filePath.substr(filePath.find_last_of("/") + 1); 
+
 
     if (fileExtension == "csv") {           // handle csv file
-        getline(file, line); // Skip header
-        while (getline(file, line)) {
-            points.push_back(parseLine(line, ','));
+        ifstream file(filePath);
+        if (!file.is_open()) {
+            throw runtime_error("Error opening the file: " + filePath);
         }
 
+        getline(file, line); // Skip header
+        while (getline(file, line)) {
+            points.push_back(parseLine(line, ',', fileName));
+        }
+        file.close();
     } 
+
     else if (fileExtension == "txt") {    // handle txt file
-        getline(file, line); // Skip header
-        while (getline(file, line)) {
-            points.push_back(parseLine(line, ' '));
+        ifstream file(filePath);
+        if (!file.is_open()) {
+            throw runtime_error("Error opening the file: " + filePath);
         }
 
+        while (getline(file, line)) {
+            points.push_back(parseLine(line, ' ', fileName));
+        }
+        file.close();
     } 
+
     else if (fileExtension == "ply") {
+        ifstream file(filePath, ios::in | ios::binary);
+        
         getline(file, line); // Skip "ply"
         getline(file, line); // Skip "format binary_little_endian 1.0"
         getline(file, line); // Read "element vertex <count>"
@@ -168,17 +168,19 @@ vector<vector<double>> readPointCloudData(const string& filePath) {
         do {
             getline(file, line);
         } while (line != "end_header");
+        getline(file, line);
 
-        points = parsePlyData(file, vertexCount);
+        points = parsePlyData(file, vertexCount, fileName);
+        file.close();
     } 
+
     else if (fileExtension == "las") {
-        points = parseLasData(filePath);
+        points = parseLasData(filePath, fileName);
     }
+    
     else {
         throw runtime_error("Unsupported file type: " + fileExtension);
     }
-
-    file.close();
 
     return points;
 }
@@ -187,8 +189,7 @@ vector<vector<double>> readPointCloudData(const string& filePath) {
 
 int main(int argc, char *argv[]) {
 
-    vector<vector<double>> points; // point cloud data points
-
+    vector<Point> points; // point cloud data points
 
     // Guide user to enter input file path
     string filePath;
@@ -206,7 +207,9 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
+
     printSamplePoints(points, 10);
+
 
     // Prepare Output
     ofstream outFile("Output.csv");
@@ -217,7 +220,9 @@ int main(int argc, char *argv[]) {
     outFile << "Query Point,K-Value,Time Taken (nanoseconds)" << endl;
 
 
-/*  
+
+
+/*  Multiple construction tests
     // Start the timer for construction
     auto start1 = chrono::high_resolution_clock::now();
 
@@ -237,7 +242,7 @@ int main(int argc, char *argv[]) {
 
 */
 
-
+    /*  Normal 1 time Construction
 
    // Start the timer for construction
     auto start1 = chrono::high_resolution_clock::now();
@@ -253,7 +258,7 @@ int main(int argc, char *argv[]) {
     auto duration1 = chrono::duration_cast<chrono::seconds>(stop1 - start1);
     cout << "Time for building the tree: " << duration1.count() << " seconds" << endl;
     
-
+    */
 
     /*    
     // Create a random number generator engine
@@ -265,7 +270,7 @@ int main(int argc, char *argv[]) {
     for (int queryIndex = 0; queryIndex < 10; queryIndex++) {
         // Generate a random query point
         int randomIndex = dist(mt);
-        vector<double> queryPoint = points[randomIndex];
+        Point queryPoint = points[randomIndex];
 
         string queryPointStr = pointToString(queryPoint);
         // cout << "Query Point: " << queryPointStr << endl;
@@ -276,7 +281,7 @@ int main(int argc, char *argv[]) {
 
             // Repeat the k-NN search multiple times
             for (int repeat = 0; repeat < 1000; ++repeat) {
-                vector<vector<double>> nearestNeighbors = kdTree.kNearestNeighbors(queryPoint, k);
+                vector<Point> nearestNeighbors = kdTree.kNearestNeighbors(queryPoint, k);
             }
 
             auto stop2 = chrono::high_resolution_clock::now();
@@ -297,7 +302,7 @@ int main(int argc, char *argv[]) {
     */
 
     /*
-    vector<double> queryPoint = points[0];
+    Point queryPoint = points[0];
     string queryPointStr = pointToString(queryPoint);
 
     cout << "Query Point: " << queryPointStr << endl;
@@ -307,7 +312,7 @@ int main(int argc, char *argv[]) {
 
             // Repeat the k-NN search multiple times
             for (int repeat = 0; repeat < 100; ++repeat) {
-                vector<vector<double>> nearestNeighbors = kdTree.kNearestNeighbors(queryPoint, k);
+                vector<Point> nearestNeighbors = kdTree.kNearestNeighbors(queryPoint, k);
             }
 
             auto stop2 = chrono::high_resolution_clock::now();

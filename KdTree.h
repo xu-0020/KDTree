@@ -2,18 +2,21 @@
 
 #include <vector>
 #include <queue>
+#include "Point.h"
+#include "ComparePoint.h"
 using namespace std;
 
 
 class KdTree {
     public:
         struct Node {
-            vector<double> point;
+            Point point; 
             Node* left;
             Node* right;
             
-            Node(vector<double>& input) : point(input), left(nullptr), right(nullptr) {}
+            Node(Point p) : point(p), left(nullptr), right(nullptr) {}
         };
+
 
         KdTree();
 
@@ -40,10 +43,10 @@ class KdTree {
         }
 
         // Function to build the KdTree
-        void buildTree(vector<vector<double>>& points);
+        void buildTree(vector<Point>& points);
 
         // Function to perform k-NN search
-        vector<vector<double>> kNearestNeighbors(vector<double>& queryPoint, int k);
+        vector<Point> kNearestNeighbors(Point& queryPoint, int k);
 
     private:
         Node* root;
@@ -57,10 +60,11 @@ class KdTree {
         }
 
 
-        Node* buildTreeRecursive (vector<vector<double>> &input, int depth);
+        Node* buildTreeRecursive (vector<Point> &input, int depth);
 
         // Helper function for k-NN search
-        void kNearestNeighborsRecursive(Node* currentNode, vector<double>& queryPoint, int k,
-                                    priority_queue<pair<double, vector<double>>>& nearestNeighbors, int depth);
+        void kNearestNeighborsRecursive(Node* currentNode, Point& queryPoint, int k,
+                                    priority_queue<pair<double, Point>, vector<pair<double, Point>>, ComparePoint>& nearestNeighbors, int depth);
+
 
 };
